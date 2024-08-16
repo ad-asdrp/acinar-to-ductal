@@ -196,3 +196,158 @@ sorted_lfc_value_2 = sorted(lfc_value.items(),key=lambda x:x[1], reverse=True)
 print(sorted_lfc_value)
 print("")
 print(sorted_lfc_value_2)
+
+#new code 15/8/24
+import rpy2.robjects as ro
+import rpy2.robjects.pandas2ri as rp
+import pandas as pd
+
+# Activate the conversion between pandas and R data frames
+rp.activate()
+
+# Read your expression matrix and conditions data into pandas DataFrames
+expression_df = pd.read_csv('expression_data.csv', index_col=0)
+conditions_df = pd.read_csv('conditions_data.csv', index_col=0)
+
+# Extract conditions from adata_combined
+conditions_df = pd.DataFrame(adata_combined.obs['condition'])
+conditions_df.index = adata_combined.obs.index  # Ensure the index matches the samples
+conditions_df.columns = ['Condition']  # Set column name to 'Condition'
+
+# Verify the conditions DataFrame
+print("Conditions DataFrame:")
+print(conditions_df.head())
+print(conditions_df.shape)
+
+# Transpose expression_df if samples are currently columns
+expression_df_transposed = expression_df.T
+print("Transposed expression_df shape:", expression_df_transposed.shape)
+
+# Verify that expression_df_transposed now has samples as rows and genes as columns
+print("First few rows of transposed expression_df:", expression_df_transposed.head())
+
+# Check the shape of conditions_df to ensure it matches the number of samples
+print("Conditions DataFrame shape:", conditions_df.shape)
+
+# Transpose expression_df to align with conditions_df
+expression_df_transposed = expression_df.T
+
+# Ensure indices are strings
+expression_df_transposed.index = expression_df_transposed.index.astype(str)
+conditions_df.index = conditions_df.index.astype(str)
+
+print("Length of expression_df_transposed indices:", len(expression_df_transposed.index))
+print("Length of conditions_df indices:", len(conditions_df.index))
+
+print("First few indices of expression_df_transposed:", expression_df_transposed.index[:5])
+print("First few indices of conditions_df:", conditions_df.index[:5])
+
+# Reindex conditions_df based on expression_df_transposed index
+aligned_conditions_df = conditions_df.reindex(expression_df_transposed.index)
+
+# Verify if alignment is successful
+print("First few rows of aligned_conditions_df:", aligned_conditions_df.head())
+print("Does alignment match?", all(expression_df_transposed.index == aligned_conditions_df.index))
+
+import rpy2.robjects as ro
+from rpy2.robjects import pandas2ri
+
+# Activate automatic conversion
+pandas2ri.activate()
+
+# Convert pandas DataFrames to R DataFrames
+expression_df_r = pandas2ri.py2rpy(expression_df_transposed)
+conditions_df_r = pandas2ri.py2rpy(aligned_conditions_df)
+
+import rpy2
+print(rpy2.__version__)
+
+# Make sure the R environment knows about these objects
+ro.globalenv['expression_df_r'] = expression_df_r
+ro.globalenv['conditions_df_r'] = conditions_df_r
+
+# Define R code for DESeq2 analysis
+r_code = """
+# Convert data frames to DESeq2 objects
+dds <- DESeqDataSetFromMatrix(countData = expression_df_r, colData = conditions_df_r, design = ~ Condition)
+
+# Run DESeq2 analysis
+dds <- DESeq(dds)
+
+# Extract results
+res <- results(dds)
+"""
+
+# Run the R code
+ro.r(r_code)
+
+# Retrieve results from R
+results_df_r = ro.r['res']
+
+import os
+import rpy2.robjects as ro
+
+# Get current working directory
+current_directory = os.getcwd()
+
+# Define the file path for saving the CSV
+file_path = os.path.join(current_directory, 'results.csv')
+
+# Define R code to write CSV
+r_code = f"""
+library(DESeq2)
+
+# Assuming 'res' is already created and available in your R environment
+write.csv(res, file = "{file_path}")
+"""
+
+# Execute the R code
+ro.r(r_code)
+
+# Read the CSV file created by R
+results_df = pd.read_csv('results.csv', index_col=0)
+print(results_df.head())
+
+df = pd.read_csv('hopefullydataset.csv.gz', index_col=0)
+
+genes = results_df.index
+lfc_values = results_df['log2FoldChange']
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+filtered_results_df = results_df[results_df['baseMean'] >= 15]
+# Sort by log2FoldChange values
+sorted_df = filtered_results_df.sort_values(by='log2FoldChange', ascending=False)
+
+# Select top 10 and bottom 10
+top_10 = sorted_df.head(10)
+bottom_10 = sorted_df.tail(10)
+
+# Create a scatter plot
+plt.figure(figsize=(12, 8))
+sns.scatterplot(x='baseMean', y='log2FoldChange', data=filtered_results_df, alpha=0.7)
+
+# Annotate top 10 points
+for gene in top_10.index:
+    row = top_10.loc[gene]
+    plt.text(row['baseMean'], row['log2FoldChange'], gene, fontsize=9, ha='right')
+
+# Annotate bottom 10 points
+for gene in bottom_10.index:
+    row = bottom_10.loc[gene]
+    plt.text(row['baseMean'], row['log2FoldChange'], gene, fontsize=9, ha='left')
+
+plt.xlabel('Base Mean')
+plt.ylabel('Log2 Fold Change')
+plt.title('Differential Gene Expression')
+plt.show()
+print(top_10)
+print(bottom_10)
+
+# Define the gene of interest
+gene_of_interest = 'Folr1'  # Replace 'GeneName' with your gene of interest
+
+# Extract data for the gene of interest
+gene_data = results_df.loc[gene_of_interest]
+print(gene_data)
